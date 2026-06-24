@@ -4,7 +4,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
-#include <memory>
 #include <string>
 #include <thread>
 
@@ -15,32 +14,13 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "FdHandle.h"
+#include "ThreadPool.h"
+
 // ---------------------------------------------------------------------------
 // Global shutdown flag — set by SIGINT handler, read by accept loop
 // ---------------------------------------------------------------------------
 std::atomic<bool> g_stop{false};
-
-// ---------------------------------------------------------------------------
-// RAII file descriptor wrapper via unique_ptr's custom pointer trick.
-// The nested 'pointer' type satisfies NullablePointer without any heap
-// allocation — unique_ptr stores the wrapped int directly.
-// ---------------------------------------------------------------------------
-struct FdDeleter {
-    struct pointer {
-        int fd_;
-        pointer() noexcept : fd_(-1) {}
-        pointer(std::nullptr_t) noexcept : fd_(-1) {}
-        pointer(int fd) noexcept : fd_(fd) {}
-        explicit operator bool() const noexcept { return fd_ != -1; }
-        operator int() const noexcept { return fd_; }
-        friend bool operator==(pointer a, pointer b) noexcept { return a.fd_ == b.fd_; }
-        friend bool operator!=(pointer a, pointer b) noexcept { return a.fd_ != b.fd_; }
-    };
-    void operator()(pointer p) const noexcept {
-        if (p) ::close(p);
-    }
-};
-using FdHandle = std::unique_ptr<int, FdDeleter>;
 
 // ---------------------------------------------------------------------------
 // Server configuration parsed from CLI arguments
@@ -134,6 +114,16 @@ int main(int argc, char* argv[]) {
     std::cout << "listening on 0.0.0.0:" << cfg.port << "\n";
 
     // -----------------------------------------------------------------------
+    // Thread pool — workers wait on a condition variable for dispatched fds
+    // -----------------------------------------------------------------------
+    ThreadPool pool(cfg.threads, g_stop, [&root](int client_fd) {
+        // Request handling will be wired in once the parser is ready.
+        // For now, the FdHandle in the worker loop closes the connection.
+        (void)root;
+        (void)client_fd;
+    });
+
+    // -----------------------------------------------------------------------
     // Accept loop — poll() with 1s timeout so we can check g_stop regularly
     // -----------------------------------------------------------------------
     pollfd pfd{};
@@ -158,15 +148,19 @@ int main(int argc, char* argv[]) {
         }
         FdHandle client(client_raw);
 
-        // TODO: dispatch to thread pool for request handling
-        // For now, the connection is closed automatically by FdHandle RAII.
+        // Transfer fd ownership across the thread boundary.
+        // release() hands the raw int to the pool; the worker re-wraps it.
+        pool.submit(client.release());
     }
 
     // -----------------------------------------------------------------------
-    // Graceful shutdown
-    // TODO: notify worker threads and join them once the pool is added
+    // Graceful shutdown — wake all workers and wait for them to finish
     // -----------------------------------------------------------------------
     std::cout << "\nshutting down...\n";
+    g_stop.store(true);             // ensure workers see stop even if loop
+                                    // broke on a poll() error, not SIGINT
+    pool.shutdown();
+    std::cout << "all workers joined, exiting.\n";
 
     return 0;
 }
