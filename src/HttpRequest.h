@@ -13,8 +13,10 @@ struct HttpRequest {
     bool valid = false;
 };
 
+#include <atomic>
+
 // Read raw bytes from client_fd into buf via recv() loop, detect the
 // header boundary (\r\n\r\n), and extract method + path with zero
 // heap allocations. Sends 400 if the request exceeds buf_size.
 // Returns an invalid request on disconnect or malformed input.
-HttpRequest read_request(int client_fd, char* buf, std::size_t buf_size);
+HttpRequest read_request(int client_fd, char* buf, std::size_t buf_size, const std::atomic<bool>& stop_flag);

@@ -1,5 +1,6 @@
 #include "HttpRequest.h"
 
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <string_view>
@@ -38,7 +39,9 @@ static void send_error(int fd, const char* status, const char* body) {
 // The returned string_views point directly into buf, so the caller must
 // keep buf alive and unmodified for as long as the views are used.
 // ---------------------------------------------------------------------------
-HttpRequest read_request(int client_fd, char* buf, std::size_t buf_size) {
+#include <atomic>
+
+HttpRequest read_request(int client_fd, char* buf, std::size_t buf_size, const std::atomic<bool>& stop_flag) {
     HttpRequest req;
     int total = 0;
 
@@ -46,7 +49,11 @@ HttpRequest read_request(int client_fd, char* buf, std::size_t buf_size) {
     while (true) {
         int n = ::recv(client_fd, buf + total,
                        static_cast<int>(buf_size) - total, 0);
-        if (n <= 0) return req;             // client disconnected or error
+        if (n < 0) {
+            if ((errno == EAGAIN || errno == EWOULDBLOCK) && !stop_flag.load()) continue;
+            return req; // disconnected or error or stopping
+        }
+        if (n == 0) return req;
 
         total += n;
 

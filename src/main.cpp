@@ -120,7 +120,7 @@ int main(int argc, char* argv[]) {
     // -----------------------------------------------------------------------
     ThreadPool pool(cfg.threads, g_stop, [&root](int client_fd) {
         char buf[8192];
-        HttpRequest req = read_request(client_fd, buf, sizeof(buf));
+        HttpRequest req = read_request(client_fd, buf, sizeof(buf), g_stop);
         if (!req.valid) return;  // disconnect, malformed, or 400 already sent
 
         handle_request(client_fd, req, root);
@@ -149,6 +149,14 @@ int main(int argc, char* argv[]) {
                       << std::strerror(errno) << "\n";
             continue;
         }
+
+        // Configure a 1-second receive timeout so workers do not block forever
+        // on idle connections during shutdown.
+        struct timeval tv;
+        tv.tv_sec = 1;
+        tv.tv_usec = 0;
+        ::setsockopt(client_raw, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
         FdHandle client(client_raw);
 
         // Transfer fd ownership across the thread boundary.
