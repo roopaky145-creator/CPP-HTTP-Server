@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include "FdHandle.h"
+#include "HttpRequest.h"
 #include "ThreadPool.h"
 
 // ---------------------------------------------------------------------------
@@ -117,10 +118,12 @@ int main(int argc, char* argv[]) {
     // Thread pool — workers wait on a condition variable for dispatched fds
     // -----------------------------------------------------------------------
     ThreadPool pool(cfg.threads, g_stop, [&root](int client_fd) {
-        // Request handling will be wired in once the parser is ready.
-        // For now, the FdHandle in the worker loop closes the connection.
+        char buf[8192];
+        HttpRequest req = read_request(client_fd, buf, sizeof(buf));
+        if (!req.valid) return;  // disconnect, malformed, or 400 already sent
+
+        // File serving will be wired in once the response module is ready.
         (void)root;
-        (void)client_fd;
     });
 
     // -----------------------------------------------------------------------
