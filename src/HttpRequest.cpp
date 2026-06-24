@@ -19,7 +19,12 @@ static void send_error(int fd, const char* status, const char* body) {
         "\r\n"
         "%s",
         status, std::strlen(body), body);
-    ::send(fd, resp, len, 0);
+    int total_sent = 0;
+    while (total_sent < len) {
+        int sent = ::send(fd, resp + total_sent, len - total_sent, 0);
+        if (sent <= 0) break;
+        total_sent += sent;
+    }
 }
 
 // ---------------------------------------------------------------------------
