@@ -44,17 +44,22 @@ static void send_error(int fd, const char* status, const char* body) {
 HttpRequest read_request(int client_fd, char* buf, std::size_t buf_size, const std::atomic<bool>& stop_flag) {
     HttpRequest req;
     int total = 0;
+    int timeouts = 0;
 
     // -- Read loop ----------------------------------------------------------
     while (true) {
         int n = ::recv(client_fd, buf + total,
                        static_cast<int>(buf_size) - total, 0);
         if (n < 0) {
-            if ((errno == EAGAIN || errno == EWOULDBLOCK) && !stop_flag.load()) continue;
+            if ((errno == EAGAIN || errno == EWOULDBLOCK) && !stop_flag.load()) {
+                if (++timeouts >= 5) return req; // Slowloris protection: drop after 5s idle
+                continue;
+            }
             return req; // disconnected or error or stopping
         }
         if (n == 0) return req;
 
+        timeouts = 0; // Reset timeout counter on successful read
         total += n;
 
         // Check for the end-of-headers marker
