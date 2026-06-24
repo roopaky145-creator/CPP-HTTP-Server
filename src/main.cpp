@@ -16,6 +16,7 @@
 
 #include "FdHandle.h"
 #include "HttpRequest.h"
+#include "HttpResponse.h"
 #include "ThreadPool.h"
 
 // ---------------------------------------------------------------------------
@@ -122,8 +123,7 @@ int main(int argc, char* argv[]) {
         HttpRequest req = read_request(client_fd, buf, sizeof(buf));
         if (!req.valid) return;  // disconnect, malformed, or 400 already sent
 
-        // File serving will be wired in once the response module is ready.
-        (void)root;
+        handle_request(client_fd, req, root);
     });
 
     // -----------------------------------------------------------------------
